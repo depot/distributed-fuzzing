@@ -1,0 +1,90 @@
+name: fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  fuzz:
+    runs-on: depot-ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-fuzz
+
+      - uses: actions/cache/restore@v5
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-
+          restore-keys: |
+            fuzz-corpus-
+
+      - run: |
+          mkdir -p fuzz/corpus new_findings/${{ matrix.shard }}
+          cargo fuzz run frame new_findings/${{ matrix.shard }} fuzz/corpus \
+            -- \
+            -max_total_time=60 \
+            -jobs=0 \
+            -workers=$(nproc)
+
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: findings-${{ matrix.shard }}
+          path: new_findings
+          if-no-files-found: ignore
+
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crashes-${{ matrix.shard }}
+          path: fuzz/artifacts/frame
+          if-no-files-found: ignore
+
+  merge:
+    needs: fuzz
+    runs-on: depot-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-fuzz
+
+      - uses: actions/cache/restore@v5
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-
+          restore-keys: |
+            fuzz-corpus-
+
+      - uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: findings-*
+          path: all_findings
+          merge-multiple: true
+
+      - run: |
+          mkdir -p fuzz/corpus
+          cargo fuzz run frame fuzz/corpus all_findings/* -- -merge=1
+
+      - id: ts
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Save merged corpus to cache
+        uses: actions/cache/save@v5
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ steps.ts.outputs.ts }}
