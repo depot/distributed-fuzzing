@@ -30,11 +30,7 @@ jobs:
 
       - run: |
           mkdir -p fuzz/corpus new_findings/${{ matrix.shard }}
-          cargo fuzz run frame new_findings/${{ matrix.shard }} fuzz/corpus \
-            -- \
-            -max_total_time=60 \
-            -jobs=0 \
-            -workers=$(nproc)
+          cargo fuzz run frame new_findings/${{ matrix.shard }} fuzz/corpus -- -fork=$(nproc) -max_total_time=60
 
       - if: always()
         uses: actions/upload-artifact@v7
