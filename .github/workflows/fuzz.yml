@@ -48,6 +48,7 @@ jobs:
 
   merge:
     needs: fuzz
+    if: ${{ always() && !cancelled() }}
     runs-on: depot-ubuntu-latest
 
     steps:
